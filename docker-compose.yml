@@ -1,0 +1,90 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: telehealth_postgres
+    environment:
+      POSTGRES_DB: telehealth
+      POSTGRES_USER: telehealth_user
+      POSTGRES_PASSWORD: secure_password_123
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U telehealth_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: telehealth_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  laravel:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: telehealth_laravel
+    environment:
+      APP_NAME: TelehealthApp
+      APP_ENV: local
+      APP_DEBUG: "true"
+      APP_URL: http://localhost:8000
+      APP_KEY: base64:3qY4n7rQ9xK2mP6vD8sL0aB5cE1fG4hJ7kN2pR6tU9w=
+      DB_CONNECTION: pgsql
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: telehealth
+      DB_USERNAME: telehealth_user
+      DB_PASSWORD: secure_password_123
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
+      sh -c "cd /app && mkdir -p bootstrap/cache storage/logs storage/framework/{sessions,views,cache} &&
+        chmod -R 775 bootstrap/cache storage &&
+        composer install --no-interaction &&
+         php artisan migrate --force &&
+         php artisan serve --host=0.0.0.0 --port=8000"
+
+  react:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: telehealth_react
+    environment:
+      REACT_APP_API_URL: http://localhost:8000/api
+      REACT_APP_WS_URL: ws://localhost:8000
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - ./frontend/node_modules:/app/node_modules
+    depends_on:
+      - laravel
+    command: npm start
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  default:
+    name: telehealth_network
